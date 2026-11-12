@@ -6,11 +6,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
-    confusion_matrix
+    confusion_matrix,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score
 )
 from xgboost import XGBClassifier
 
@@ -18,6 +21,10 @@ from xgboost import XGBClassifier
 FEATURES = [
     "GR", "RHOB", "DPOR", "RILD", "SP", "PE",
     "Vsh_PreTertiary"
+]
+
+VSH_FEATURES = [
+    "GR", "RHOB", "DPOR", "RILD", "SP", "PE"
 ]
 
 CLASS_NAMES = [
@@ -32,9 +39,7 @@ def train_models(X_train, X_test, y_train, y_test, output):
     models = {
         "Logistic Regression": LogisticRegression(max_iter=1000),
         "Random Forest": RandomForestClassifier(
-            n_estimators=150,
-            max_depth=10,
-            random_state=42
+            n_estimators=150, max_depth=10, random_state=42
         ),
         "XGBoost": XGBClassifier(
             n_estimators=150,
@@ -68,12 +73,38 @@ def train_models(X_train, X_test, y_train, y_test, output):
     }).T.sort_values("Accuracy", ascending=False)
 
     best_name = scores.index[0]
-    best_model = results[best_name]["model"]
-
-    joblib.dump(best_model, output / "best_model.pkl")
+    joblib.dump(results[best_name]["model"], output / "best_model.pkl")
     scores.to_csv(output / "model_comparison.csv")
 
     return results, scores, best_name
+
+
+def train_vsh_model(X_train, X_test, y_train, y_test, output):
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+
+    model = RandomForestRegressor(
+        n_estimators=150,
+        max_depth=12,
+        random_state=42,
+        n_jobs=-1
+    )
+
+    model.fit(X_train[VSH_FEATURES], y_train)
+    predictions = model.predict(X_test[VSH_FEATURES])
+
+    metrics = {
+        "R2": r2_score(y_test, predictions),
+        "MAE": mean_absolute_error(y_test, predictions),
+        "RMSE": mean_squared_error(y_test, predictions) ** 0.5
+    }
+
+    joblib.dump(model, output / "vsh_regressor.pkl")
+    pd.DataFrame([metrics]).to_csv(
+        output / "vsh_regression_metrics.csv", index=False
+    )
+
+    return model, predictions, metrics
 
 
 def evaluate_model(y_test, predictions, output):
@@ -88,11 +119,7 @@ def evaluate_model(y_test, predictions, output):
         zero_division=0
     ))
 
-    cm = confusion_matrix(
-        y_test,
-        predictions,
-        labels=[0, 1, 2, 3]
-    )
+    cm = confusion_matrix(y_test, predictions, labels=[0, 1, 2, 3])
 
     sns.heatmap(
         cm,
